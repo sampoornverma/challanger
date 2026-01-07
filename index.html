@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Study Together</title>
+
+  <style>
+    body { font-family: Arial, sans-serif; padding: 20px; }
+    .hidden { display: none; }
+    .progress { background:#eee; border-radius:6px; overflow:hidden; margin:6px 0; }
+    .progress-bar { background:#4caf50; height:18px; color:white; font-size:12px; text-align:center; }
+  </style>
+
+  <!-- ✅ YOUTUBE CALLBACK MUST BE GLOBAL & FIRST -->
+  <script>
+    window.ytReady = false;
+    function onYouTubeIframeAPIReady() {
+      window.ytReady = true;
+      console.log("YouTube API ready (HTML)");
+    }
+  </script>
+
+  <!-- ✅ LOAD YOUTUBE IFRAME API -->
+  <script src="https://www.youtube.com/iframe_api"></script>
+</head>
+
+<body>
+
+  <h2>📚 Study Together</h2>
+
+  <button id="loginBtn">Login with Google</button>
+
+  <div id="app" class="hidden">
+    <p id="userInfo"></p>
+
+    <input id="roomId" placeholder="Room ID" />
+    <br><br>
+
+    <input id="playlistUrl" placeholder="YouTube Playlist URL" />
+    <br><br>
+
+    <button id="joinRoom">Join Room</button>
+
+    <hr>
+
+    <div id="player"></div>
+
+    <h3>🏆 Leaderboard</h3>
+    <div id="leaderboard"></div>
+  </div>
+
+  <!-- ✅ YOUR APP (MUST BE LAST) -->
+  <script type="module" src="app.js"></script>
+
+</body>
+</html>
