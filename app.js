@@ -22,7 +22,7 @@ const firebaseConfig = {
   appId: "1:82460696666:web:a2eb02dbfb4047c9ee3863"
 };
 
-// ================= INIT FIREBASE =================
+// ================= INIT =================
 const firebaseApp = initializeApp(firebaseConfig);
 const auth = getAuth(firebaseApp);
 const db = getFirestore(firebaseApp);
@@ -44,6 +44,9 @@ let playlist = [];
 let currentIndex = 0;
 let player = null;
 
+// Cache video durations to avoid flicker
+let durationCache = {}; // videoId -> seconds
+
 // ================= LOGIN =================
 loginBtn.onclick = async () => {
   const result = await signInWithPopup(auth, provider);
@@ -52,14 +55,10 @@ loginBtn.onclick = async () => {
   userInfo.innerText = `👤 ${user.displayName}`;
   loginBtn.style.display = "none";
   appDiv.classList.remove("hidden");
-
-  console.log("Login successful");
 };
 
 // ================= JOIN ROOM =================
 joinRoomBtn.onclick = async () => {
-  console.log("Join Room clicked");
-
   roomId = roomInput.value.trim();
   if (!roomId) return alert("Enter Room ID");
 
@@ -82,13 +81,10 @@ joinRoomBtn.onclick = async () => {
 // ================= INIT PLAYER =================
 function initPlayer() {
   if (!window.ytReady) {
-    console.log("Waiting for YouTube API...");
     return setTimeout(initPlayer, 400);
   }
 
   if (player) return;
-
-  console.log("Creating YouTube Player");
 
   player = new YT.Player("player", {
     height: "360",
@@ -126,33 +122,77 @@ function listenRoom() {
   });
 }
 
-// ================= TRACK PROGRESS =================
+// ================= TRACK PROGRESS + TIME =================
 function startTracking() {
   setInterval(async () => {
     if (!player || !player.getDuration()) return;
 
-    const progress =
-      (player.getCurrentTime() / player.getDuration()) * 100;
+    const videoId = playlist[currentIndex];
+    const duration = player.getDuration();
+    const currentTime = player.getCurrentTime();
+
+    // Cache duration
+    if (!durationCache[videoId]) {
+      durationCache[videoId] = duration;
+    }
+
+    const videoProgress = (currentTime / duration) * 100;
+
+    // Remaining time in current video
+    let remainingSeconds = duration - currentTime;
+
+    // Remaining videos time (cached)
+    for (let i = currentIndex + 1; i < playlist.length; i++) {
+      const vid = playlist[i];
+      if (durationCache[vid]) {
+        remainingSeconds += durationCache[vid];
+      }
+    }
+
+    const totalProgress =
+      ((currentIndex + videoProgress / 100) / playlist.length) * 100;
 
     await setDoc(
       doc(db, "rooms", roomId, "users", user.uid),
-      { name: user.displayName, progress }
+      {
+        name: user.displayName,
+        videoIndex: currentIndex + 1,
+        totalVideos: playlist.length,
+        totalProgress,
+        remainingSeconds,
+        updatedAt: Date.now()
+      },
+      { merge: true } // 🔥 prevents flicker
     );
   }, 3000);
 }
 
-// ================= UI =================
+// ================= LEADERBOARD =================
 function renderLeaderboard(users) {
   leaderboard.innerHTML = "";
-  users.sort((a, b) => b.progress - a.progress);
 
-  users.forEach(u => {
+  users = users.filter(u =>
+    typeof u.totalProgress === "number" &&
+    typeof u.remainingSeconds === "number"
+  );
+
+  users.sort((a, b) => b.totalProgress - a.totalProgress);
+
+  users.forEach((u, index) => {
+    const isLeader = index === 0;
+    const timeLeft = formatTime(u.remainingSeconds);
+
     leaderboard.innerHTML += `
-      <div>
-        <strong>${u.name}</strong>
+      <div style="margin-bottom:12px">
+        <strong>
+          ${isLeader ? "👑 " : ""}
+          ${u.name} — Video ${u.videoIndex}/${u.totalVideos}
+        </strong>
+        <div style="font-size:13px">⏳ Time left: ${timeLeft}</div>
+
         <div class="progress">
-          <div class="progress-bar" style="width:${u.progress}%">
-            ${u.progress.toFixed(0)}%
+          <div class="progress-bar" style="width:${u.totalProgress}%">
+            ${u.totalProgress.toFixed(1)}%
           </div>
         </div>
       </div>
@@ -169,15 +209,33 @@ function extractPlaylistId(url) {
   }
 }
 
+function formatTime(seconds) {
+  seconds = Math.max(0, Math.floor(seconds));
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  return h > 0 ? `${h}h ${m}m` : `${m}m`;
+}
+
+// ================= FETCH FULL PLAYLIST =================
 async function fetchPlaylistVideos(playlistId) {
-  const YT_API_KEY = "AIzaSyCQ141N-fQAcGXu4uxCoqFAEK7Hc9V4rkk"; // YOUR KEY
+  const YT_API_KEY = "AIzaSyCQ141N-fQAcGXu4uxCoqFAEK7Hc9V4rkk";
+  let videoIds = [];
+  let nextPageToken = "";
 
-  const res = await fetch(
-    `https://www.googleapis.com/youtube/v3/playlistItems?part=contentDetails&maxResults=25&playlistId=${playlistId}&key=${YT_API_KEY}`
-  );
+  do {
+    const res = await fetch(
+      `https://www.googleapis.com/youtube/v3/playlistItems` +
+      `?part=contentDetails&maxResults=50&playlistId=${playlistId}` +
+      `&key=${YT_API_KEY}` +
+      (nextPageToken ? `&pageToken=${nextPageToken}` : "")
+    );
 
-  const data = await res.json();
-  if (!data.items) return [];
+    const data = await res.json();
+    if (!data.items) break;
 
-  return data.items.map(v => v.contentDetails.videoId);
+    videoIds.push(...data.items.map(i => i.contentDetails.videoId));
+    nextPageToken = data.nextPageToken || "";
+  } while (nextPageToken);
+
+  return videoIds;
 }
